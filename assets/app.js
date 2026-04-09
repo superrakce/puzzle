@@ -601,6 +601,36 @@
     }
   };
 
+  PUZZLE_APP.drawPuzzleGuide = function(ctx, rect, cols, rows, shapeType){
+    const normalizedShape = normalizeShapeType(shapeType);
+    const cellWidth = rect.width / cols;
+    const cellHeight = rect.height / rows;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.strokeStyle = 'rgba(148,163,184,0.45)';
+    ctx.lineWidth = 1;
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+
+    for(let row = 0; row < rows; row++){
+      for(let col = 0; col < cols; col++){
+        drawPieceOutline(ctx, normalizedShape, {
+          x: rect.x + col * cellWidth,
+          y: rect.y + row * cellHeight,
+          width: cellWidth,
+          height: cellHeight,
+          row,
+          col,
+          rows,
+          cols
+        });
+      }
+    }
+
+    ctx.restore();
+  };
+
   PUZZLE_APP.sliceImageToPieces = function(image, cols, rows, shapeType = 'rectangle'){
     const pieces = [];
     const normalizedShape = normalizeShapeType(shapeType);

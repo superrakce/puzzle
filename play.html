@@ -26,19 +26,13 @@
 
       <div id="emptyNotice" class="notice hidden">尚未選擇拼圖，請先回到拼圖列表選擇一張。</div>
 
-      <div id="gameWrap" class="puzzle-layout hidden">
-        <div class="board-wrap">
-          <div id="board" class="board">
-            <div id="boardGrid" class="board-grid"></div>
-          </div>
+      <div id="gameWrap" class="hidden">
+        <div class="canvas-stage">
+          <canvas id="gameCanvas" class="game-canvas"></canvas>
         </div>
-
-        <div class="tray-wrap">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <strong>拼圖碎片</strong>
-            <span id="pieceStatus" class="small"></span>
-          </div>
-          <div id="tray" class="tray"></div>
+        <div class="canvas-status">
+          <div id="pieceStatus" class="small"></div>
+          <div class="small">中央是主放置區，四周留白可暫放尚未完成的拼圖塊。</div>
         </div>
       </div>
     </section>
@@ -51,13 +45,12 @@
       const selected = PUZZLE_APP.getSelectedPuzzle();
       const emptyNotice = $('#emptyNotice');
       const gameWrap = $('#gameWrap');
-      const board = $('#board');
-      const boardGrid = $('#boardGrid');
-      const tray = $('#tray');
+      const gameCanvas = $('#gameCanvas');
       const pieceStatus = $('#pieceStatus');
       const progressText = $('#progressText');
       const puzzleTitle = $('#puzzleTitle');
       const puzzleDesc = $('#puzzleDesc');
+      const btnShuffle = $('#btnShuffle');
 
       if(!selected){
         emptyNotice.classList.remove('hidden');
@@ -68,13 +61,19 @@
       puzzleTitle.textContent = selected.name;
       puzzleDesc.textContent = `${selected.cols} × ${selected.rows} ｜ ${PUZZLE_APP.getShapeLabel(selected.shapeType)} ｜ 共 ${selected.cols * selected.rows} 片`;
 
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = selected.imageDataUrl;
+      const image = new Image();
+      image.crossOrigin = 'anonymous';
+      image.src = selected.imageDataUrl;
 
       const state = {
         pieces: [],
         placed: 0,
+        draggingId: null,
+        dragOffsetX: 0,
+        dragOffsetY: 0,
+        canvasWidth: 0,
+        canvasHeight: 0,
+        boardRect: null,
         cellW: 0,
         cellH: 0
       };
@@ -86,195 +85,321 @@
           : `拼圖進行中 ${state.placed}/${state.pieces.length}`;
       }
 
-      function updateBoardGrid(){
-        boardGrid.style.backgroundSize = `${100 / selected.cols}% ${100 / selected.rows}%`;
+      function clamp(value, min, max){
+        return Math.min(Math.max(value, min), max);
       }
 
-      function randomPosInTray(pieceEl){
-        const trayRect = tray.getBoundingClientRect();
-        const width = pieceEl.offsetWidth || state.cellW;
-        const height = pieceEl.offsetHeight || state.cellH;
-        const maxX = Math.max(8, trayRect.width - width - 8);
-        const maxY = Math.max(8, trayRect.height - height - 8);
-
+      function getCanvasPoint(event){
+        const rect = gameCanvas.getBoundingClientRect();
+        const scaleX = state.canvasWidth / rect.width;
+        const scaleY = state.canvasHeight / rect.height;
         return {
-          x: Math.round(Math.random() * maxX),
-          y: Math.round(Math.random() * maxY)
+          x: (event.clientX - rect.left) * scaleX,
+          y: (event.clientY - rect.top) * scaleY
         };
       }
 
-      function placeBackToTray(piece){
-        piece.placed = false;
-        piece.el.classList.remove('placed');
-        tray.appendChild(piece.el);
-        const pos = randomPosInTray(piece.el);
-        piece.el.style.left = `${pos.x}px`;
-        piece.el.style.top = `${pos.y}px`;
+      function computeLayout(){
+        const stageWidth = gameCanvas.parentElement.clientWidth;
+        const cssWidth = Math.max(320, stageWidth);
+        const cssHeight = Math.max(620, Math.min(920, Math.round(cssWidth * 0.86)));
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+        gameCanvas.width = Math.round(cssWidth * dpr);
+        gameCanvas.height = Math.round(cssHeight * dpr);
+        gameCanvas.style.height = `${cssHeight}px`;
+
+        const ctx = gameCanvas.getContext('2d');
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.scale(dpr, dpr);
+
+        state.canvasWidth = cssWidth;
+        state.canvasHeight = cssHeight;
+
+        const marginX = cssWidth * 0.18;
+        const marginY = cssHeight * 0.16;
+        let boardWidth = cssWidth - marginX * 2;
+        let boardHeight = boardWidth * (image.naturalHeight / image.naturalWidth);
+        const maxBoardHeight = cssHeight - marginY * 2;
+
+        if(boardHeight > maxBoardHeight){
+          boardHeight = maxBoardHeight;
+          boardWidth = boardHeight * (image.naturalWidth / image.naturalHeight);
+        }
+
+        state.boardRect = {
+          x: Math.round((cssWidth - boardWidth) / 2),
+          y: Math.round((cssHeight - boardHeight) / 2),
+          width: Math.round(boardWidth),
+          height: Math.round(boardHeight)
+        };
+        state.cellW = state.boardRect.width / selected.cols;
+        state.cellH = state.boardRect.height / selected.rows;
       }
 
-      function onDrop(piece, clientX, clientY){
-        const boardRect = board.getBoundingClientRect();
-        const isInside =
-          clientX >= boardRect.left &&
-          clientX <= boardRect.right &&
-          clientY >= boardRect.top &&
-          clientY <= boardRect.bottom;
+      function drawBackground(ctx){
+        ctx.clearRect(0, 0, state.canvasWidth, state.canvasHeight);
 
-        if(!isInside){
+        const board = state.boardRect;
+        ctx.save();
+        ctx.fillStyle = 'rgba(37,99,235,0.05)';
+        ctx.strokeStyle = 'rgba(37,99,235,0.16)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(board.x - 14, board.y - 14, board.width + 28, board.height + 28, 20);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+
+        PUZZLE_APP.drawPuzzleGuide(ctx, board, selected.cols, selected.rows, selected.shapeType);
+      }
+
+      function drawPieces(ctx){
+        const ordered = [
+          ...state.pieces.filter(piece=>piece.placed),
+          ...state.pieces.filter(piece=>!piece.placed && piece.id !== state.draggingId),
+          ...state.pieces.filter(piece=>piece.id === state.draggingId)
+        ];
+
+        ordered.forEach(piece=>{
+          ctx.save();
+          ctx.drawImage(piece.image, piece.x, piece.y, piece.width, piece.height);
+          ctx.restore();
+        });
+      }
+
+      function renderCanvas(){
+        const ctx = gameCanvas.getContext('2d');
+        drawBackground(ctx);
+        drawPieces(ctx);
+      }
+
+      function getTargetPosition(piece){
+        return {
+          x: state.boardRect.x + piece.boardXUnits * state.cellW,
+          y: state.boardRect.y + piece.boardYUnits * state.cellH
+        };
+      }
+
+      function getZones(){
+        const board = state.boardRect;
+        const padding = 14;
+        return [
+          {x: padding, y: padding, width: state.canvasWidth - padding * 2, height: Math.max(40, board.y - padding * 2)},
+          {x: padding, y: board.y + board.height + padding, width: state.canvasWidth - padding * 2, height: Math.max(40, state.canvasHeight - (board.y + board.height) - padding * 2)},
+          {x: padding, y: board.y, width: Math.max(40, board.x - padding * 2), height: board.height},
+          {x: board.x + board.width + padding, y: board.y, width: Math.max(40, state.canvasWidth - (board.x + board.width) - padding * 2), height: board.height}
+        ].filter(zone=>zone.width > 24 && zone.height > 24);
+      }
+
+      function randomizeUnplacedPieces(){
+        const zones = getZones();
+        state.pieces.forEach((piece, index)=>{
           if(piece.placed){
-            state.placed--;
+            const target = getTargetPosition(piece);
+            piece.x = target.x;
+            piece.y = target.y;
+            return;
           }
-          placeBackToTray(piece);
-          setStatus();
+
+          const zone = zones[index % zones.length] || {
+            x: 20,
+            y: 20,
+            width: state.canvasWidth - 40,
+            height: state.canvasHeight - 40
+          };
+          const maxX = Math.max(zone.x, zone.x + zone.width - piece.width);
+          const maxY = Math.max(zone.y, zone.y + zone.height - piece.height);
+          piece.x = Math.round(zone.x + Math.random() * Math.max(0, maxX - zone.x));
+          piece.y = Math.round(zone.y + Math.random() * Math.max(0, maxY - zone.y));
+        });
+      }
+
+      function createPieceModels(pieceDataList){
+        return Promise.all(pieceDataList.map(pieceData=>new Promise(resolve=>{
+          const pieceImage = new Image();
+          pieceImage.onload = ()=>{
+            resolve({
+              ...pieceData,
+              image: pieceImage,
+              width: pieceData.widthUnits * state.cellW,
+              height: pieceData.heightUnits * state.cellH,
+              x: 0,
+              y: 0,
+              placed: false
+            });
+          };
+          pieceImage.src = pieceData.dataUrl;
+        })));
+      }
+
+      function findPieceAt(point){
+        const ordered = [...state.pieces].reverse();
+        return ordered.find(piece=>{
+          return (
+            point.x >= piece.x &&
+            point.x <= piece.x + piece.width &&
+            point.y >= piece.y &&
+            point.y <= piece.y + piece.height
+          );
+        }) || null;
+      }
+
+      function trySnapPiece(piece){
+        const target = getTargetPosition(piece);
+        const currentCenterX = piece.x + piece.width / 2;
+        const currentCenterY = piece.y + piece.height / 2;
+        const boardCenterX = currentCenterX - state.boardRect.x;
+        const boardCenterY = currentCenterY - state.boardRect.y;
+        const targetCol = Math.floor(boardCenterX / state.cellW);
+        const targetRow = Math.floor(boardCenterY / state.cellH);
+        const nearTarget =
+          Math.abs(piece.x - target.x) <= state.cellW * 0.35 &&
+          Math.abs(piece.y - target.y) <= state.cellH * 0.35;
+        const inCorrectCell = targetCol === piece.col && targetRow === piece.row;
+
+        if(!nearTarget && !inCorrectCell){
+          return false;
+        }
+
+        piece.x = target.x;
+        piece.y = target.y;
+        if(!piece.placed){
+          state.placed++;
+        }
+        piece.placed = true;
+        return true;
+      }
+
+      function restoreOnCanvas(piece){
+        piece.placed = false;
+        piece.x = clamp(piece.x, 8, state.canvasWidth - piece.width - 8);
+        piece.y = clamp(piece.y, 8, state.canvasHeight - piece.height - 8);
+      }
+
+      function handlePointerDown(event){
+        const point = getCanvasPoint(event);
+        const piece = findPieceAt(point);
+        if(!piece){
           return;
         }
 
-        const relX = clientX - boardRect.left;
-        const relY = clientY - boardRect.top;
-        const targetCol = Math.floor(relX / state.cellW);
-        const targetRow = Math.floor(relY / state.cellH);
-        const isCorrect = targetCol === piece.col && targetRow === piece.row;
+        if(piece.placed){
+          state.placed--;
+        }
+        piece.placed = false;
+        state.draggingId = piece.id;
+        state.dragOffsetX = point.x - piece.x;
+        state.dragOffsetY = point.y - piece.y;
 
-        if(isCorrect){
-          if(!piece.placed){
-            state.placed++;
-          }
-          piece.placed = true;
-          piece.el.classList.add('placed');
-          board.appendChild(piece.el);
-          piece.el.style.left = `${piece.boardXUnits * state.cellW}px`;
-          piece.el.style.top = `${piece.boardYUnits * state.cellH}px`;
-        }else{
-          if(piece.placed){
-            state.placed--;
-          }
-          placeBackToTray(piece);
+        const idx = state.pieces.findIndex(item=>item.id === piece.id);
+        state.pieces.splice(idx, 1);
+        state.pieces.push(piece);
+
+        gameCanvas.setPointerCapture?.(event.pointerId);
+        renderCanvas();
+      }
+
+      function handlePointerMove(event){
+        if(!state.draggingId){
+          return;
+        }
+
+        const piece = state.pieces.find(item=>item.id === state.draggingId);
+        if(!piece){
+          return;
+        }
+
+        const point = getCanvasPoint(event);
+        piece.x = clamp(point.x - state.dragOffsetX, 4, state.canvasWidth - piece.width - 4);
+        piece.y = clamp(point.y - state.dragOffsetY, 4, state.canvasHeight - piece.height - 4);
+        renderCanvas();
+      }
+
+      function handlePointerUp(event){
+        if(!state.draggingId){
+          return;
+        }
+
+        const piece = state.pieces.find(item=>item.id === state.draggingId);
+        state.draggingId = null;
+        gameCanvas.releasePointerCapture?.(event.pointerId);
+
+        if(piece && !trySnapPiece(piece)){
+          restoreOnCanvas(piece);
         }
 
         setStatus();
+        renderCanvas();
+
         if(state.placed === state.pieces.length){
           setTimeout(()=>alert('完成拼圖！'), 50);
         }
       }
 
-      function makeDraggable(piece){
-        let startX = 0;
-        let startY = 0;
-        let originX = 0;
-        let originY = 0;
-        let dragging = false;
+      async function initializeGame(resetPieces = true){
+        const prevCanvasWidth = state.canvasWidth || 1;
+        const prevCanvasHeight = state.canvasHeight || 1;
+        computeLayout();
 
-        const onPointerMove = event=>{
-          if(!dragging){
-            return;
-          }
-
-          const dx = event.clientX - startX;
-          const dy = event.clientY - startY;
-          piece.el.style.left = `${originX + dx}px`;
-          piece.el.style.top = `${originY + dy}px`;
-        };
-
-        const onPointerUp = event=>{
-          if(!dragging){
-            return;
-          }
-
-          dragging = false;
-          piece.el.classList.remove('dragging');
-          piece.el.releasePointerCapture?.(event.pointerId);
-          document.removeEventListener('pointermove', onPointerMove);
-          document.removeEventListener('pointerup', onPointerUp);
-          onDrop(piece, event.clientX, event.clientY);
-        };
-
-        piece.el.addEventListener('pointerdown', event=>{
-          if(piece.placed){
-            state.placed--;
-            piece.placed = false;
-            piece.el.classList.remove('placed');
-            tray.appendChild(piece.el);
-          }
-
-          dragging = true;
-          piece.el.classList.add('dragging');
-          piece.el.setPointerCapture?.(event.pointerId);
-          startX = event.clientX;
-          startY = event.clientY;
-
-          const parentRect = piece.el.parentElement.getBoundingClientRect();
-          const trayRect = tray.getBoundingClientRect();
-          originX = piece.el.offsetLeft + (parentRect.left - trayRect.left);
-          originY = piece.el.offsetTop + (parentRect.top - trayRect.top);
-
-          tray.appendChild(piece.el);
-          piece.el.style.left = `${originX}px`;
-          piece.el.style.top = `${originY}px`;
-
-          document.addEventListener('pointermove', onPointerMove);
-          document.addEventListener('pointerup', onPointerUp);
-        });
-      }
-
-      function render(){
-        const baseSize = Math.min(720, window.innerWidth < 900 ? window.innerWidth - 72 : 720);
-        board.style.width = `${baseSize}px`;
-
-        const boardRect = board.getBoundingClientRect();
-        state.cellW = boardRect.width / selected.cols;
-        state.cellH = boardRect.height / selected.rows;
-        updateBoardGrid();
-
-        tray.innerHTML = '';
-        board.querySelectorAll('.piece').forEach(node=>node.remove());
-
-        const sliced = PUZZLE_APP.sliceImageToPieces(
-          img,
-          selected.cols,
-          selected.rows,
-          selected.shapeType
-        );
-
-        state.pieces = PUZZLE_APP.shuffle(sliced).map(pieceData=>{
-          const el = document.createElement('div');
-          el.className = 'piece';
-          el.style.width = `${pieceData.widthUnits * state.cellW}px`;
-          el.style.height = `${pieceData.heightUnits * state.cellH}px`;
-          el.style.backgroundImage = `url(${pieceData.dataUrl})`;
-          tray.appendChild(el);
-
-          const piece = {...pieceData, el, placed:false};
-          makeDraggable(piece);
-          return piece;
-        });
-
-        state.placed = 0;
-        state.pieces.forEach(piece=>{
-          const pos = randomPosInTray(piece.el);
-          piece.el.style.left = `${pos.x}px`;
-          piece.el.style.top = `${pos.y}px`;
-        });
+        if(resetPieces || !state.pieces.length){
+          const pieceDataList = PUZZLE_APP.sliceImageToPieces(
+            image,
+            selected.cols,
+            selected.rows,
+            selected.shapeType
+          );
+          state.pieces = await createPieceModels(pieceDataList);
+          state.placed = 0;
+          randomizeUnplacedPieces();
+        }else{
+          state.pieces.forEach(piece=>{
+            piece.width = piece.widthUnits * state.cellW;
+            piece.height = piece.heightUnits * state.cellH;
+            if(piece.placed){
+              const target = getTargetPosition(piece);
+              piece.x = target.x;
+              piece.y = target.y;
+            }else{
+              piece.x = clamp(piece.x / prevCanvasWidth * state.canvasWidth, 8, state.canvasWidth - piece.width - 8);
+              piece.y = clamp(piece.y / prevCanvasHeight * state.canvasHeight, 8, state.canvasHeight - piece.height - 8);
+            }
+          });
+        }
 
         setStatus();
+        renderCanvas();
       }
 
-      img.onload = render;
-      img.onerror = ()=>{
+      image.onload = ()=>{
+        initializeGame(true);
+      };
+
+      image.onerror = ()=>{
         emptyNotice.textContent = '圖片載入失敗，請確認 JSON 與同名圖片都在同一個資料夾。';
         emptyNotice.classList.remove('hidden');
         gameWrap.classList.add('hidden');
       };
 
+      gameCanvas.addEventListener('pointerdown', handlePointerDown);
+      gameCanvas.addEventListener('pointermove', handlePointerMove);
+      gameCanvas.addEventListener('pointerup', handlePointerUp);
+      gameCanvas.addEventListener('pointercancel', handlePointerUp);
+
       window.addEventListener('resize', ()=>{
-        if(img.complete){
-          render();
+        if(image.complete){
+          initializeGame(false);
         }
       });
 
-      $('#btnShuffle').addEventListener('click', ()=>{
-        if(img.complete){
-          render();
-        }
+      btnShuffle.addEventListener('click', ()=>{
+        state.placed = 0;
+        state.pieces.forEach(piece=>{
+          piece.placed = false;
+        });
+        randomizeUnplacedPieces();
+        setStatus();
+        renderCanvas();
       });
     })();
   </script>
