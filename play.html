@@ -29,6 +29,7 @@
       <div id="gameWrap" class="hidden">
         <div class="canvas-stage">
           <canvas id="gameCanvas" class="game-canvas"></canvas>
+          <div id="confettiLayer" class="confetti-layer"></div>
         </div>
         <div class="canvas-status">
           <div id="pieceStatus" class="small"></div>
@@ -38,6 +39,7 @@
     </section>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
   <script src="assets/app.js"></script>
   <script>
     (()=>{
@@ -46,6 +48,7 @@
       const emptyNotice = $('#emptyNotice');
       const gameWrap = $('#gameWrap');
       const gameCanvas = $('#gameCanvas');
+      const confettiLayer = $('#confettiLayer');
       const pieceStatus = $('#pieceStatus');
       const progressText = $('#progressText');
       const puzzleTitle = $('#puzzleTitle');
@@ -65,6 +68,7 @@
       image.crossOrigin = 'anonymous';
       image.src = selected.imageDataUrl;
 
+      const audioState = { ctx: null };
       const state = {
         pieces: [],
         placed: 0,
@@ -75,7 +79,9 @@
         canvasHeight: 0,
         boardRect: null,
         cellW: 0,
-        cellH: 0
+        cellH: 0,
+        feedbackRaf: null,
+        completed: false
       };
 
       function setStatus(){
@@ -87,6 +93,122 @@
 
       function clamp(value, min, max){
         return Math.min(Math.max(value, min), max);
+      }
+
+      function getAudioContext(){
+        if(!audioState.ctx){
+          audioState.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if(audioState.ctx.state === 'suspended'){
+          audioState.ctx.resume();
+        }
+        return audioState.ctx;
+      }
+
+      function playTone(startFreq, duration, type, volume, endFreq = startFreq, delay = 0){
+        const ctx = getAudioContext();
+        const now = ctx.currentTime + delay;
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        oscillator.type = type;
+        oscillator.frequency.setValueAtTime(startFreq, now);
+        oscillator.frequency.linearRampToValueAtTime(endFreq, now + duration);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(volume, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+        oscillator.connect(gain);
+        gain.connect(ctx.destination);
+        oscillator.start(now);
+        oscillator.stop(now + duration + 0.03);
+      }
+
+      function playSuccessSound(){
+        playTone(720, 0.12, 'triangle', 0.05, 920, 0);
+        playTone(980, 0.16, 'sine', 0.035, 1180, 0.07);
+      }
+
+      function playErrorSound(){
+        playTone(240, 0.12, 'square', 0.045, 190, 0);
+        playTone(180, 0.12, 'square', 0.04, 140, 0.11);
+      }
+
+      function launchConfetti(){
+        if(typeof gsap === 'undefined'){
+          return;
+        }
+
+        confettiLayer.innerHTML = '';
+        const colors = ['#2563eb', '#f97316', '#16a34a', '#ef4444', '#eab308', '#0ea5e9'];
+        const count = 48;
+        const centerX = state.canvasWidth / 2;
+        const centerY = Math.max(40, state.boardRect.y + state.boardRect.height * 0.18);
+
+        for(let i = 0; i < count; i++){
+          const piece = document.createElement('div');
+          piece.className = 'confetti-piece';
+          piece.style.background = colors[i % colors.length];
+          piece.style.left = `${centerX}px`;
+          piece.style.top = `${centerY}px`;
+          confettiLayer.appendChild(piece);
+
+          const angle = (-110 + (220 * i) / count) * (Math.PI / 180);
+          const distance = 140 + Math.random() * 260;
+          const x = Math.cos(angle) * distance;
+          const y = Math.sin(angle) * distance + 180 + Math.random() * 160;
+          const rotation = Math.random() * 720 - 360;
+          const delay = Math.random() * 0.18;
+
+          gsap.fromTo(piece,
+            { x: 0, y: 0, rotation: 0, opacity: 1, scale: 0.8 },
+            {
+              x,
+              y,
+              rotation,
+              opacity: 0,
+              scale: 1,
+              duration: 1.8 + Math.random() * 0.5,
+              delay,
+              ease: 'power2.out',
+              onComplete: ()=>piece.remove()
+            }
+          );
+        }
+      }
+
+      function hasActiveErrors(){
+        const now = performance.now();
+        return state.pieces.some(piece=>piece.errorFlashUntil && piece.errorFlashUntil > now);
+      }
+
+      function ensureFeedbackLoop(){
+        if(state.feedbackRaf){
+          return;
+        }
+
+        const tick = ()=>{
+          renderCanvas();
+          if(hasActiveErrors()){
+            state.feedbackRaf = requestAnimationFrame(tick);
+          }else{
+            state.feedbackRaf = null;
+          }
+        };
+
+        state.feedbackRaf = requestAnimationFrame(tick);
+      }
+
+      function markPieceError(piece){
+        piece.errorFlashStart = performance.now();
+        piece.errorFlashUntil = piece.errorFlashStart + 1500;
+        playErrorSound();
+        ensureFeedbackLoop();
+      }
+
+      function maybeCelebrateCompletion(){
+        if(state.placed === state.pieces.length && !state.completed){
+          state.completed = true;
+          launchConfetti();
+        }
       }
 
       function getCanvasPoint(event){
@@ -154,6 +276,29 @@
         PUZZLE_APP.drawPuzzleGuide(ctx, board, selected.cols, selected.rows, selected.shapeType);
       }
 
+      function drawErrorFeedback(ctx, piece){
+        const now = performance.now();
+        if(!piece.errorFlashUntil || piece.errorFlashUntil <= now){
+          return;
+        }
+
+        const elapsed = now - piece.errorFlashStart;
+        const visible = Math.floor(elapsed / 250) % 2 === 0;
+        if(!visible){
+          return;
+        }
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(239,68,68,0.95)';
+        ctx.lineWidth = 3;
+        ctx.shadowColor = 'rgba(239,68,68,0.45)';
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.roundRect(piece.x - 4, piece.y - 4, piece.width + 8, piece.height + 8, 14);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       function drawPieces(ctx){
         const ordered = [
           ...state.pieces.filter(piece=>piece.placed),
@@ -165,6 +310,7 @@
           ctx.save();
           ctx.drawImage(piece.image, piece.x, piece.y, piece.width, piece.height);
           ctx.restore();
+          drawErrorFeedback(ctx, piece);
         });
       }
 
@@ -212,6 +358,7 @@
           const maxY = Math.max(zone.y, zone.y + zone.height - piece.height);
           piece.x = Math.round(zone.x + Math.random() * Math.max(0, maxX - zone.x));
           piece.y = Math.round(zone.y + Math.random() * Math.max(0, maxY - zone.y));
+          piece.errorFlashUntil = 0;
         });
       }
 
@@ -226,7 +373,9 @@
               height: pieceData.heightUnits * state.cellH,
               x: 0,
               y: 0,
-              placed: false
+              placed: false,
+              errorFlashStart: 0,
+              errorFlashUntil: 0
             });
           };
           pieceImage.src = pieceData.dataUrl;
@@ -243,6 +392,17 @@
             point.y <= piece.y + piece.height
           );
         }) || null;
+      }
+
+      function isOverBoardArea(piece){
+        const centerX = piece.x + piece.width / 2;
+        const centerY = piece.y + piece.height / 2;
+        return (
+          centerX >= state.boardRect.x &&
+          centerX <= state.boardRect.x + state.boardRect.width &&
+          centerY >= state.boardRect.y &&
+          centerY <= state.boardRect.y + state.boardRect.height
+        );
       }
 
       function trySnapPiece(piece){
@@ -264,10 +424,12 @@
 
         piece.x = target.x;
         piece.y = target.y;
+        piece.errorFlashUntil = 0;
         if(!piece.placed){
           state.placed++;
         }
         piece.placed = true;
+        playSuccessSound();
         return true;
       }
 
@@ -288,6 +450,7 @@
           state.placed--;
         }
         piece.placed = false;
+        piece.errorFlashUntil = 0;
         state.draggingId = piece.id;
         state.dragOffsetX = point.x - piece.x;
         state.dragOffsetY = point.y - piece.y;
@@ -325,16 +488,19 @@
         state.draggingId = null;
         gameCanvas.releasePointerCapture?.(event.pointerId);
 
-        if(piece && !trySnapPiece(piece)){
-          restoreOnCanvas(piece);
+        if(piece){
+          if(trySnapPiece(piece)){
+            maybeCelebrateCompletion();
+          }else if(isOverBoardArea(piece)){
+            restoreOnCanvas(piece);
+            markPieceError(piece);
+          }else{
+            restoreOnCanvas(piece);
+          }
         }
 
         setStatus();
         renderCanvas();
-
-        if(state.placed === state.pieces.length){
-          setTimeout(()=>alert('完成拼圖！'), 50);
-        }
       }
 
       async function initializeGame(resetPieces = true){
@@ -351,6 +517,8 @@
           );
           state.pieces = await createPieceModels(pieceDataList);
           state.placed = 0;
+          state.completed = false;
+          confettiLayer.innerHTML = '';
           randomizeUnplacedPieces();
         }else{
           state.pieces.forEach(piece=>{
@@ -394,8 +562,11 @@
 
       btnShuffle.addEventListener('click', ()=>{
         state.placed = 0;
+        state.completed = false;
+        confettiLayer.innerHTML = '';
         state.pieces.forEach(piece=>{
           piece.placed = false;
+          piece.errorFlashUntil = 0;
         });
         randomizeUnplacedPieces();
         setStatus();
