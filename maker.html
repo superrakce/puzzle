@@ -1,3 +1,280 @@
-<!doctype html><html lang="zh-Hant"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>製作拼圖</title><link rel="stylesheet" href="assets/style.css"/></head><body><div class="container"><div class="topbar"><a class="btn btn-secondary" href="index.html">← 返回首頁</a><div class="progress">製作拼圖</div></div><section class="panel" style="padding:24px;"><div class="page-head"><div><h1 class="page-title">製作拼圖</h1><p class="page-desc">載入圖片後，設定水平與垂直切塊數，匯出圖片與 JSON 供開始拼圖頁讀取。</p></div></div><div class="grid-2"><div class="card"><div class="field"><label for="imageFile">載入圖片</label><input id="imageFile" type="file" accept="image/*"/></div><div class="field"><label for="puzzleName">拼圖名稱</label><input id="puzzleName" type="text" placeholder="請輸入拼圖名稱"/><div class="small">預設會使用圖片檔名。</div></div><div class="grid-2" style="gap:12px"><div class="field"><label for="cols">水平切塊數</label><input id="cols" type="number" min="2" max="12" value="4"/></div><div class="field"><label for="rows">垂直切塊數</label><input id="rows" type="number" min="2" max="12" value="4"/></div></div><div class="field"><label for="thumbSize">縮圖尺寸</label><input id="thumbSize" type="number" min="160" max="600" value="320"/></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button id="btnPrepare" class="btn btn-primary">產生設定預覽</button><button id="btnExportJson" class="btn btn-secondary" disabled>匯出 JSON</button><button id="btnExportImage" class="btn btn-secondary" disabled>匯出圖片</button></div><div id="makerNotice" class="notice hidden" style="margin-top:16px"></div></div><div class="card"><div class="field"><label>圖片預覽</label><div id="previewBox" class="preview-box"><span class="small">尚未載入圖片</span></div></div><div id="metaBox" class="small"></div></div></div></section></div><script src="assets/app.js"></script><script>
-(()=>{const $=s=>document.querySelector(s),imageFile=$('#imageFile'),puzzleName=$('#puzzleName'),cols=$('#cols'),rows=$('#rows'),thumbSize=$('#thumbSize'),btnPrepare=$('#btnPrepare'),btnExportJson=$('#btnExportJson'),btnExportImage=$('#btnExportImage'),previewBox=$('#previewBox'),metaBox=$('#metaBox'),makerNotice=$('#makerNotice');let currentImageDataUrl=null,currentConfig=null,originalFileName='';function showNotice(t){makerNotice.textContent=t;makerNotice.classList.remove('hidden')}imageFile.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;originalFileName=file.name.replace(/\.[^.]+$/,'');if(!puzzleName.value.trim())puzzleName.value=originalFileName;currentImageDataUrl=await PUZZLE_APP.readFileAsDataURL(file);previewBox.innerHTML='';const img=document.createElement('img');img.src=currentImageDataUrl;previewBox.appendChild(img);btnExportJson.disabled=true;btnExportImage.disabled=false;currentConfig=null;metaBox.textContent='原始尺寸：載入中...';img.onload=()=>{metaBox.textContent=`原始尺寸：${img.naturalWidth} × ${img.naturalHeight}`}});btnPrepare.addEventListener('click',()=>{if(!currentImageDataUrl){showNotice('請先載入圖片。');return}const name=puzzleName.value.trim()||originalFileName||'puzzle',c=Math.max(2,parseInt(cols.value||'4',10)),r=Math.max(2,parseInt(rows.value||'4',10)),t=Math.max(160,parseInt(thumbSize.value||'320',10));currentConfig={id:name.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff_-]+/gi,'-').replace(/^-+|-+$/g,''),name,imageDataUrl:currentImageDataUrl,thumbDataUrl:currentImageDataUrl,cols:c,rows:r,thumbSize:t,createdAt:new Date().toISOString()};btnExportJson.disabled=false;btnExportImage.disabled=false;showNotice('已產生設定，可以匯出 JSON 與圖片。');metaBox.innerHTML=`<div>拼圖名稱：${name}</div><div>切塊數：${c} × ${r}</div><div>總片數：${c*r}</div>`});btnExportJson.addEventListener('click',()=>{if(!currentConfig){showNotice('請先按「產生設定預覽」。');return}PUZZLE_APP.downloadJSON(currentConfig,`${currentConfig.name}.json`)});btnExportImage.addEventListener('click',async()=>{if(!currentImageDataUrl){showNotice('請先載入圖片。');return}const res=await fetch(currentImageDataUrl),blob=await res.blob(),name=(puzzleName.value.trim()||originalFileName||'puzzle')+'.png';PUZZLE_APP.downloadBlob(blob,name)})})();
-</script></body></html>
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>製作拼圖</title>
+  <link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <a class="btn btn-secondary" href="index.html">← 返回首頁</a>
+      <div class="progress">製作拼圖</div>
+    </div>
+
+    <section class="panel" style="padding:24px;">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">製作拼圖</h1>
+          <p class="page-desc">
+            載入圖片後設定切塊數與拼圖形狀，匯出一份拼圖設定 JSON 與一張圖片。
+            將兩個檔案以相同檔名放進 <code>data/</code>，開始拼圖頁就會自動讀取。
+          </p>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="field">
+            <label for="imageFile">載入圖片</label>
+            <input id="imageFile" type="file" accept="image/*" />
+          </div>
+
+          <div class="field">
+            <label for="puzzleName">拼圖名稱</label>
+            <input id="puzzleName" type="text" placeholder="請輸入拼圖名稱" />
+            <div class="small">預設會使用圖片檔名，匯出的 JSON 與圖片會共用同一個檔名基底。</div>
+          </div>
+
+          <div class="grid-2" style="gap:12px">
+            <div class="field">
+              <label for="cols">水平切塊數</label>
+              <input id="cols" type="number" min="2" max="12" value="4" />
+            </div>
+
+            <div class="field">
+              <label for="rows">垂直切塊數</label>
+              <input id="rows" type="number" min="2" max="12" value="4" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="shapeType">拼圖方塊型狀</label>
+            <select id="shapeType"></select>
+            <div class="small">經典拼圖與矩型會切滿整張圖片，其餘形狀會用圖片挖洞的方式產生拼圖塊。</div>
+          </div>
+
+          <div class="field">
+            <label for="thumbSize">縮圖尺寸</label>
+            <input id="thumbSize" type="number" min="160" max="600" value="320" />
+          </div>
+
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button id="btnPrepare" class="btn btn-primary">產生設定預覽</button>
+            <button id="btnExportJson" class="btn btn-secondary" disabled>匯出 JSON</button>
+            <button id="btnExportImage" class="btn btn-secondary" disabled>匯出圖片</button>
+          </div>
+
+          <div id="makerNotice" class="notice hidden" style="margin-top:16px"></div>
+        </div>
+
+        <div class="card">
+          <div class="field">
+            <label>圖片預覽</label>
+            <div id="previewBox" class="preview-box">
+              <span class="small">尚未載入圖片</span>
+            </div>
+          </div>
+
+          <div id="metaBox" class="small"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="assets/app.js"></script>
+  <script>
+    (()=>{
+      const $ = selector => document.querySelector(selector);
+      const imageFile = $('#imageFile');
+      const puzzleName = $('#puzzleName');
+      const cols = $('#cols');
+      const rows = $('#rows');
+      const shapeType = $('#shapeType');
+      const thumbSize = $('#thumbSize');
+      const btnPrepare = $('#btnPrepare');
+      const btnExportJson = $('#btnExportJson');
+      const btnExportImage = $('#btnExportImage');
+      const previewBox = $('#previewBox');
+      const metaBox = $('#metaBox');
+      const makerNotice = $('#makerNotice');
+
+      const previewCanvas = document.createElement('canvas');
+      const previewImage = new Image();
+      previewImage.crossOrigin = 'anonymous';
+
+      let currentImageDataUrl = null;
+      let currentImageBlob = null;
+      let currentConfig = null;
+      let originalFileName = '';
+      let currentImageExtension = '.png';
+      let exportBaseName = 'puzzle';
+
+      previewBox.innerHTML = '';
+      previewBox.appendChild(previewCanvas);
+
+      PUZZLE_APP.SHAPE_OPTIONS.forEach(option=>{
+        const element = document.createElement('option');
+        element.value = option.value;
+        element.textContent = option.label;
+        shapeType.appendChild(element);
+      });
+      shapeType.value = 'classic';
+
+      function showNotice(text){
+        makerNotice.textContent = text;
+        makerNotice.classList.remove('hidden');
+      }
+
+      function makeSafeFileBaseName(value){
+        const safeName = String(value || '')
+          .trim()
+          .replace(/[\\/:*?"<>|]+/g, '-')
+          .replace(/\s+/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-+|-+$/g, '');
+        return safeName || 'puzzle';
+      }
+
+      function getCurrentCounts(){
+        return {
+          cols: Math.max(2, parseInt(cols.value || '4', 10)),
+          rows: Math.max(2, parseInt(rows.value || '4', 10))
+        };
+      }
+
+      function renderPreview(showOverlay){
+        if(!currentImageDataUrl || !previewImage.complete){
+          previewBox.innerHTML = '<span class="small">尚未載入圖片</span>';
+          return;
+        }
+
+        if(previewCanvas.parentElement !== previewBox){
+          previewBox.innerHTML = '';
+          previewBox.appendChild(previewCanvas);
+        }
+
+        const counts = getCurrentCounts();
+        PUZZLE_APP.renderPuzzlePreview(
+          previewCanvas,
+          previewImage,
+          counts.cols,
+          counts.rows,
+          shapeType.value,
+          showOverlay
+        );
+
+        if(!currentConfig){
+          metaBox.textContent = `原始尺寸：${previewImage.naturalWidth} × ${previewImage.naturalHeight}`;
+        }
+      }
+
+      function buildConfig(){
+        const name = puzzleName.value.trim() || originalFileName || 'puzzle';
+        const counts = getCurrentCounts();
+        const safeBaseName = makeSafeFileBaseName(name);
+        return {
+          config: {
+            id: safeBaseName.toLowerCase(),
+            name,
+            cols: counts.cols,
+            rows: counts.rows,
+            shapeType: PUZZLE_APP.normalizeShapeType(shapeType.value),
+            thumbSize: Math.max(160, parseInt(thumbSize.value || '320', 10)),
+            createdAt: new Date().toISOString()
+          },
+          baseName: safeBaseName
+        };
+      }
+
+      function applyPreparedConfig(){
+        const next = buildConfig();
+        currentConfig = next.config;
+        exportBaseName = next.baseName;
+        renderPreview(true);
+        btnExportJson.disabled = false;
+        btnExportImage.disabled = false;
+        showNotice(`已產生設定。請將 ${exportBaseName}.json 與 ${exportBaseName}${currentImageExtension} 一起放到 data/。`);
+        metaBox.innerHTML = `
+          <div>拼圖名稱：${currentConfig.name}</div>
+          <div>匯出檔名：${exportBaseName}.json / ${exportBaseName}${currentImageExtension}</div>
+          <div>拼圖形狀：${PUZZLE_APP.getShapeLabel(currentConfig.shapeType)}</div>
+          <div>切塊數：${currentConfig.cols} × ${currentConfig.rows}</div>
+          <div>總片數：${currentConfig.cols * currentConfig.rows}</div>
+          <div>原始尺寸：${previewImage.naturalWidth || '-'} × ${previewImage.naturalHeight || '-'}</div>
+        `;
+      }
+
+      function handleLivePreviewChange(){
+        if(!currentImageDataUrl){
+          return;
+        }
+
+        if(currentConfig){
+          applyPreparedConfig();
+        }else{
+          renderPreview(false);
+        }
+      }
+
+      previewImage.onload = ()=>{
+        renderPreview(false);
+      };
+
+      imageFile.addEventListener('change', async event=>{
+        const file = event.target.files?.[0];
+        if(!file){
+          return;
+        }
+
+        originalFileName = file.name.replace(/\.[^.]+$/, '');
+        currentImageExtension = (file.name.match(/\.[^.]+$/)?.[0] || '.png').toLowerCase();
+        currentImageBlob = file;
+        if(!puzzleName.value.trim()){
+          puzzleName.value = originalFileName;
+        }
+
+        currentImageDataUrl = await PUZZLE_APP.readFileAsDataURL(file);
+        currentConfig = null;
+        btnExportJson.disabled = true;
+        btnExportImage.disabled = false;
+        metaBox.textContent = '原始尺寸：載入中...';
+        previewImage.src = currentImageDataUrl;
+      });
+
+      [cols, rows, shapeType].forEach(element=>{
+        element.addEventListener('input', handleLivePreviewChange);
+        element.addEventListener('change', handleLivePreviewChange);
+      });
+
+      btnPrepare.addEventListener('click', ()=>{
+        if(!currentImageDataUrl){
+          showNotice('請先載入圖片。');
+          return;
+        }
+
+        applyPreparedConfig();
+      });
+
+      btnExportJson.addEventListener('click', ()=>{
+        if(!currentConfig){
+          showNotice('請先按「產生設定預覽」。');
+          return;
+        }
+
+        PUZZLE_APP.downloadJSON(currentConfig, `${exportBaseName}.json`);
+      });
+
+      btnExportImage.addEventListener('click', ()=>{
+        if(!currentImageBlob){
+          showNotice('請先載入圖片。');
+          return;
+        }
+
+        PUZZLE_APP.downloadBlob(currentImageBlob, `${exportBaseName}${currentImageExtension}`);
+      });
+    })();
+  </script>
+</body>
+</html>

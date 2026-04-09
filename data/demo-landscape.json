@@ -1,0 +1,9 @@
+{
+  "id": "demo-landscape",
+  "name": "示範風景",
+  "cols": 4,
+  "rows": 4,
+  "shapeType": "rectangle",
+  "thumbSize": 320,
+  "createdAt": "2026-04-09T00:00:00.000Z"
+}
