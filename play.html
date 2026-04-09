@@ -30,6 +30,10 @@
         <div class="canvas-stage">
           <canvas id="gameCanvas" class="game-canvas"></canvas>
           <div id="confettiLayer" class="confetti-layer"></div>
+          <div class="play-thumb">
+            <img id="referenceThumb" alt="拼圖縮圖" />
+            <div class="play-thumb-label">原圖參考</div>
+          </div>
         </div>
         <div class="canvas-status">
           <div id="pieceStatus" class="small"></div>
@@ -49,6 +53,7 @@
       const gameWrap = $('#gameWrap');
       const gameCanvas = $('#gameCanvas');
       const confettiLayer = $('#confettiLayer');
+      const referenceThumb = $('#referenceThumb');
       const pieceStatus = $('#pieceStatus');
       const progressText = $('#progressText');
       const puzzleTitle = $('#puzzleTitle');
@@ -63,6 +68,7 @@
       gameWrap.classList.remove('hidden');
       puzzleTitle.textContent = selected.name;
       puzzleDesc.textContent = `${selected.cols} × ${selected.rows} ｜ ${PUZZLE_APP.getShapeLabel(selected.shapeType)} ｜ 共 ${selected.cols * selected.rows} 片`;
+      referenceThumb.src = selected.imageDataUrl;
 
       const image = new Image();
       image.crossOrigin = 'anonymous';
