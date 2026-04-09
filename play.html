@@ -53,6 +53,7 @@
       const gameWrap = $('#gameWrap');
       const gameCanvas = $('#gameCanvas');
       const confettiLayer = $('#confettiLayer');
+      const playThumb = document.querySelector('.play-thumb');
       const referenceThumb = $('#referenceThumb');
       const pieceStatus = $('#pieceStatus');
       const progressText = $('#progressText');
@@ -87,7 +88,8 @@
         cellW: 0,
         cellH: 0,
         feedbackRaf: null,
-        completed: false
+        completed: false,
+        thumbDrag: null
       };
 
       function setStatus(){
@@ -215,6 +217,16 @@
           state.completed = true;
           launchConfetti();
         }
+      }
+
+      function clampThumbPosition(left, top){
+        const stageRect = playThumb.parentElement.getBoundingClientRect();
+        const maxLeft = stageRect.width - playThumb.offsetWidth - 8;
+        const maxTop = stageRect.height - playThumb.offsetHeight - 8;
+        return {
+          left: clamp(left, 8, maxLeft),
+          top: clamp(top, 8, maxTop)
+        };
       }
 
       function getCanvasPoint(event){
@@ -446,6 +458,10 @@
       }
 
       function handlePointerDown(event){
+        if(event.target.closest('.play-thumb')){
+          return;
+        }
+
         const point = getCanvasPoint(event);
         const piece = findPieceAt(point);
         if(!piece){
@@ -554,6 +570,51 @@
         emptyNotice.classList.remove('hidden');
         gameWrap.classList.add('hidden');
       };
+
+      playThumb.addEventListener('pointerdown', event=>{
+        event.stopPropagation();
+        const thumbRect = playThumb.getBoundingClientRect();
+        const stageRect = playThumb.parentElement.getBoundingClientRect();
+        state.thumbDrag = {
+          pointerId: event.pointerId,
+          offsetX: event.clientX - thumbRect.left,
+          offsetY: event.clientY - thumbRect.top
+        };
+
+        playThumb.classList.add('dragging');
+        playThumb.style.right = 'auto';
+        playThumb.style.bottom = 'auto';
+        playThumb.style.left = `${thumbRect.left - stageRect.left}px`;
+        playThumb.style.top = `${thumbRect.top - stageRect.top}px`;
+        playThumb.setPointerCapture?.(event.pointerId);
+      });
+
+      playThumb.addEventListener('pointermove', event=>{
+        if(!state.thumbDrag || state.thumbDrag.pointerId !== event.pointerId){
+          return;
+        }
+
+        const stageRect = playThumb.parentElement.getBoundingClientRect();
+        const next = clampThumbPosition(
+          event.clientX - stageRect.left - state.thumbDrag.offsetX,
+          event.clientY - stageRect.top - state.thumbDrag.offsetY
+        );
+        playThumb.style.left = `${next.left}px`;
+        playThumb.style.top = `${next.top}px`;
+      });
+
+      function stopThumbDrag(event){
+        if(!state.thumbDrag || state.thumbDrag.pointerId !== event.pointerId){
+          return;
+        }
+
+        playThumb.classList.remove('dragging');
+        playThumb.releasePointerCapture?.(event.pointerId);
+        state.thumbDrag = null;
+      }
+
+      playThumb.addEventListener('pointerup', stopThumbDrag);
+      playThumb.addEventListener('pointercancel', stopThumbDrag);
 
       gameCanvas.addEventListener('pointerdown', handlePointerDown);
       gameCanvas.addEventListener('pointermove', handlePointerMove);
