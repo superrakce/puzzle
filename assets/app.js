@@ -317,6 +317,26 @@
     ctx.restore();
   }
 
+  function drawTransparentFallback(ctx, width, height){
+    const size = Math.max(10, Math.round(Math.min(width, height) * 0.18));
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.fillRect(0, 0, width, height);
+
+    for(let y = 0; y < height; y += size){
+      for(let x = 0; x < width; x += size){
+        ctx.fillStyle = ((x / size + y / size) % 2 === 0)
+          ? 'rgba(203,213,225,0.72)'
+          : 'rgba(241,245,249,0.92)';
+        ctx.fillRect(x, y, size, size);
+      }
+    }
+
+    ctx.fillStyle = 'rgba(37,99,235,0.05)';
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  }
+
   function createPieceCanvas(image, row, col, cols, rows, shapeType){
     const cellWidth = image.width / cols;
     const cellHeight = image.height / rows;
@@ -340,6 +360,7 @@
     });
     ctx.save();
     ctx.clip();
+    drawTransparentFallback(ctx, canvas.width, canvas.height);
     ctx.drawImage(
       image,
       padX - col * cellWidth,
@@ -348,6 +369,16 @@
       image.height
     );
     ctx.restore();
+    drawPieceOutline(ctx, normalizedShape, {
+      x: padX,
+      y: padY,
+      width: cellWidth,
+      height: cellHeight,
+      row,
+      col,
+      rows,
+      cols
+    });
 
     return {
       canvas,
