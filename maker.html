@@ -110,6 +110,7 @@
       let originalFileName = '';
       let currentImageExtension = '.png';
       let exportBaseName = 'puzzle';
+      let lastAutoPuzzleName = '';
 
       previewBox.innerHTML = '';
       previewBox.appendChild(previewCanvas);
@@ -188,6 +189,10 @@
         };
       }
 
+      function refreshExportBaseName(){
+        exportBaseName = makeSafeFileBaseName(puzzleName.value.trim() || originalFileName || 'puzzle');
+      }
+
       function applyPreparedConfig(){
         const next = buildConfig();
         currentConfig = next.config;
@@ -211,10 +216,16 @@
           return;
         }
 
+        refreshExportBaseName();
         if(currentConfig){
           applyPreparedConfig();
         }else{
           renderPreview(false);
+          metaBox.innerHTML = `
+            <div>目前檔名：${currentImageBlob?.name || '-'}</div>
+            <div>預設匯出檔名：${exportBaseName}.json / ${exportBaseName}${currentImageExtension}</div>
+            <div>原始尺寸：${previewImage.naturalWidth || '-'} × ${previewImage.naturalHeight || '-'}</div>
+          `;
         }
       }
 
@@ -228,22 +239,30 @@
           return;
         }
 
+        const previousAutoPuzzleName = lastAutoPuzzleName;
         originalFileName = file.name.replace(/\.[^.]+$/, '');
         currentImageExtension = (file.name.match(/\.[^.]+$/)?.[0] || '.png').toLowerCase();
         currentImageBlob = file;
-        if(!puzzleName.value.trim()){
+
+        if(!puzzleName.value.trim() || puzzleName.value.trim() === previousAutoPuzzleName){
           puzzleName.value = originalFileName;
+          lastAutoPuzzleName = originalFileName;
         }
+        refreshExportBaseName();
 
         currentImageDataUrl = await PUZZLE_APP.readFileAsDataURL(file);
         currentConfig = null;
         btnExportJson.disabled = true;
         btnExportImage.disabled = false;
-        metaBox.textContent = '原始尺寸：載入中...';
+        metaBox.innerHTML = `
+          <div>目前檔名：${file.name}</div>
+          <div>預設匯出檔名：${exportBaseName}.json / ${exportBaseName}${currentImageExtension}</div>
+          <div>原始尺寸：載入中...</div>
+        `;
         previewImage.src = currentImageDataUrl;
       });
 
-      [cols, rows, shapeType].forEach(element=>{
+      [puzzleName, cols, rows, shapeType].forEach(element=>{
         element.addEventListener('input', handleLivePreviewChange);
         element.addEventListener('change', handleLivePreviewChange);
       });
